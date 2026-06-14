@@ -4747,11 +4747,17 @@ void PrintConfigDef::init_fff_params()
     def = this->add("wave_overhang_nozzle_temp", coInt);
     def->label = L("Nozzle temperature");
     def->category = L("Cooling");
-    def->tooltip = L("If non-zero, override the hotend temperature specifically for wave-overhang "
-                     "extrusions. An M104 is emitted at the start of each wave region and restored "
-                     "to the filament default at the end. Useful to experiment with cooler extrusion "
-                     "on the unsupported tracks (less sagging, better cooling). Set to 0 to keep the "
-                     "filament default.");
+    def->tooltip = L("If non-zero, override the hotend temperature for wave-overhang extrusions. "
+                     "The temperature is switched per line type, not per layer: right before a wave "
+                     "run starts the printer sets the overhang temperature and BLOCKS (M109 / "
+                     "TEMPERATURE_WAIT) until it is reached, then restores the filament default "
+                     "(also waiting) when the next non-wave extrusion of a different line type "
+                     "begins. So normal walls and infill keep the normal temperature and only the "
+                     "wave runs use the override, and a wave run never prints before the target is "
+                     "reached. Works for heating and cooling. Note: the wait is a short pause at "
+                     "each transition (it happens parked off the overhang, then travels in). Useful "
+                     "for cooler extrusion on the unsupported tracks (less sagging, better cooling). "
+                     "Set to 0 to keep the filament default.");
     def->sidetext = L("°C");
     def->mode = comAdvanced;
     def->min = 0;

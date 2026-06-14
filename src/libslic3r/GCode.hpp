@@ -592,6 +592,12 @@ private:
     // Orca: accumulated wave-extrusion time on the current layer (seconds).
     // Used by wave_overhang_min_layer_time; reset at each layer change.
     double                              m_wave_layer_accumulated_time = 0.;
+    // Orca: currently-applied wave-overhang nozzle temperature (deg C, 0 = not
+    // active / normal temperature). Managed at layer granularity by
+    // process_layer() so the hotend is pre-heated to the wave-overhang
+    // temperature one layer BEFORE the overhang prints, then restored once the
+    // waves are finished.
+    int                                m_wave_overhang_active_temp = 0;
 
     std::unique_ptr<CoolingBuffer>      m_cooling_buffer;
     std::unique_ptr<SpiralVase>         m_spiral_vase;

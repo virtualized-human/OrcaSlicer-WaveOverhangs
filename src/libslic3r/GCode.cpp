@@ -4544,6 +4544,12 @@ LayerResult GCode::process_layer(
     m_layer = &layer;
     m_object_layer_over_raft = false;
 
+    // Orca: wave-overhang nozzle temperature is applied per line type in _extrude()
+    // (switch to the overhang temperature when entering a wave run, restore the
+    // filament default when the next non-wave extrusion of a different line type
+    // begins). It is no longer handled per layer, so normal extrusions on a wave
+    // layer keep the normal temperature. See _extrude().
+
     if (!m_config.time_lapse_gcode.value.empty() && !is_BBL_Printer()) {
         DynamicConfig config;
         config.set_key_value("layer_num", new ConfigOptionInt(m_layer_index));
@@ -6325,19 +6331,59 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         gcode += buf;
     }
 
-    // Orca: wave-overhang nozzle temperature override. M104 (no wait) at region start,
-    // restored at region end. The first wave line prints at mixed temperature; by the
-    // time the region finishes the hotend is settled.
-    const int wave_nozzle_temp = m_config.wave_overhang_nozzle_temp.value;
-    const bool wave_temp_active = path.wave_overhang && wave_nozzle_temp > 0;
-    int restore_nozzle_temp = 0;
-    if (wave_temp_active) {
-        const ConfigOption *o = m_config.option("nozzle_temperature");
-        if (auto *ints = dynamic_cast<const ConfigOptionInts*>(o))
-            restore_nozzle_temp = ints->values.empty() ? 0 : ints->values[0];
-        char buf[64];
-        snprintf(buf, sizeof(buf), "M104 S%d ; wave-overhang temp override\n", wave_nozzle_temp);
-        gcode += buf;
+    // Orca: wave-overhang nozzle temperature, applied per line type (not per layer).
+    // Switch to the overhang temperature when this path is a wave extrusion and we
+    // are not already at it; restore the filament default when a non-wave extrusion
+    // (a different line type) begins. The change is emitted here, before this path's
+    // lead-in travel, and BLOCKS (M109 / TEMPERATURE_WAIT) until the target is
+    // reached, so the wave run never prints before the temperature is right. The
+    // wait happens while the nozzle is still parked at the end of the previous path
+    // (off the overhang), then it travels in and prints. State in
+    // m_wave_overhang_active_temp ensures one wait per transition (run start / run
+    // end), not per individual line. Emitted without an explicit tool index so it
+    // targets the currently active extruder.
+    {
+        const int wave_temp   = m_config.wave_overhang_nozzle_temp.value;
+        const int normal_temp = (wave_temp > 0 && m_writer.filament())
+            ? m_config.nozzle_temperature.get_at(m_writer.filament()->id()) : 0;
+        // Set `target` and BLOCK until reached, correct for both directions/flavors.
+        // M109 S only blocks while heating on Marlin, so cooling down needs M109 R
+        // (Marlin) or TEMPERATURE_WAIT (Klipper); RepRapFirmware uses G10 + M116.
+        auto set_and_wait = [&](int target, int current) -> std::string {
+            const GCodeFlavor flavor = m_writer.get_gcode_flavor();
+            if (target >= current || flavor == gcfRepRapFirmware)
+                return m_writer.set_temperature(target, /*wait=*/true);
+            std::string g = m_writer.set_temperature(target, /*wait=*/false);
+            char buf[128];
+            if (flavor == gcfKlipper) {
+                const int cur = m_writer.filament() ? m_writer.filament()->id() : 0;
+                char sensor[24];
+                if (cur <= 0) snprintf(sensor, sizeof(sensor), "extruder");
+                else          snprintf(sensor, sizeof(sensor), "extruder%d", cur);
+                snprintf(buf, sizeof(buf),
+                         "TEMPERATURE_WAIT SENSOR=%s MAXIMUM=%d ; wave-overhang wait (cooldown)\n",
+                         sensor, target);
+            } else
+                snprintf(buf, sizeof(buf),
+                         "M109 R%d ; wave-overhang wait for temp (cooldown)\n", target);
+            g += buf;
+            return g;
+        };
+        if (wave_temp > 0) {
+            if (path.wave_overhang) {
+                if (m_wave_overhang_active_temp != wave_temp) {
+                    gcode += "; wave-overhang: nozzle temp (wait)\n";
+                    gcode += set_and_wait(wave_temp, normal_temp > 0 ? normal_temp : wave_temp);
+                    m_wave_overhang_active_temp = wave_temp;
+                }
+            } else if (m_wave_overhang_active_temp != 0) {
+                if (normal_temp > 0) {
+                    gcode += "; wave-overhang: restore nozzle temp (wait)\n";
+                    gcode += set_and_wait(normal_temp, m_wave_overhang_active_temp);
+                }
+                m_wave_overhang_active_temp = 0;
+            }
+        }
     }
 
     if (is_bridge(path.role()))
@@ -7212,13 +7258,10 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     this->set_last_pos(path.last_point());
 
     // Orca: wave-overhang — close fan-override scope and clear state flag.
+    // Nozzle temperature is handled at layer granularity in process_layer(), not
+    // per path.
     if (wave_fan_active || wave_floor_fan_active)
         gcode += ";_WAVE_OVERHANG_FAN_END\n";
-    if (wave_temp_active && restore_nozzle_temp > 0) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "M104 S%d ; wave-overhang temp restore\n", restore_nozzle_temp);
-        gcode += buf;
-    }
     if (path.wave_overhang)
         m_inside_wave_overhang = false;
 
