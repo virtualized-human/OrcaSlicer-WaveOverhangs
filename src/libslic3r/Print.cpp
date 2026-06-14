@@ -1464,15 +1464,18 @@ StringObjectException Print::validate(StringObjectException *warning, Polygons* 
                 return {L("One or more object were assigned an extruder that the printer does not have.")};
 #endif
 
-        auto validate_extrusion_width = [min_nozzle_diameter, max_nozzle_diameter](const ConfigBase &config, const char *opt_key, double layer_height, std::string &err_msg) -> bool {
-            double extrusion_width_min = config.get_abs_value(opt_key, min_nozzle_diameter);
-            double extrusion_width_max = config.get_abs_value(opt_key, max_nozzle_diameter);
+        // Orca: nozzle diameters are passed in per object (min_nozzle / max_nozzle)
+        // so percent-based line widths resolve over the nozzle THIS object uses, not
+        // the global minimum across the whole plate.
+        auto validate_extrusion_width = [](const ConfigBase &config, const char *opt_key, double layer_height, double min_nozzle, double max_nozzle, std::string &err_msg) -> bool {
+            double extrusion_width_min = config.get_abs_value(opt_key, min_nozzle);
+            double extrusion_width_max = config.get_abs_value(opt_key, max_nozzle);
         	if (extrusion_width_min == 0) {
         		// Default "auto-generated" extrusion width is always valid.
         	} else if (extrusion_width_min <= layer_height) {
                 err_msg = L("Too small line width");
 				return false;
-			} else if (extrusion_width_max > max_nozzle_diameter * MAX_LINE_WIDTH_MULTIPLIER) {
+			} else if (extrusion_width_max > max_nozzle * MAX_LINE_WIDTH_MULTIPLIER) {
                 err_msg = L("Too large line width");
 				return false;
 			}
@@ -1560,6 +1563,26 @@ StringObjectException Print::validate(StringObjectException *warning, Polygons* 
                 }
             }
 
+            // Orca: validate layer height against the nozzles THIS object actually
+            // uses (each object/region has a fixed extruder), not the global minimum
+            // across the whole plate. Otherwise a small nozzle on an unrelated object
+            // wrongly caps this object's layer height.
+            // Validate the object's model layer height against only the extruders
+            // that print the object's MODEL (its regions/volumes) — not support,
+            // which is a helper that may run on a different (smaller) nozzle and
+            // must not cap the object's layer height.
+            double object_min_nozzle_diameter = std::numeric_limits<double>::max();
+            double object_max_nozzle_diameter = 0.;
+            for (unsigned int eid : object->object_extruders()) {
+                const double d = m_config.nozzle_diameter.get_at(eid);
+                object_min_nozzle_diameter = std::min(object_min_nozzle_diameter, d);
+                object_max_nozzle_diameter = std::max(object_max_nozzle_diameter, d);
+            }
+            if (object_min_nozzle_diameter == std::numeric_limits<double>::max()) {
+                object_min_nozzle_diameter = min_nozzle_diameter; // fallback (no extruders collected)
+                object_max_nozzle_diameter = max_nozzle_diameter;
+            }
+
             double initial_layer_print_height = m_config.initial_layer_print_height.value;
             double first_layer_min_nozzle_diameter;
             if (object->has_raft()) {
@@ -1568,31 +1591,31 @@ StringObjectException Print::validate(StringObjectException *warning, Polygons* 
                     ? object->config().support_interface_filament-1
                     : object->config().support_filament-1;
                 first_layer_min_nozzle_diameter = (first_layer_extruder == size_t(-1)) ?
-                    min_nozzle_diameter :
+                    object_min_nozzle_diameter :
                     m_config.nozzle_diameter.get_at(first_layer_extruder);
             } else {
-                // if we don't have raft layers, any nozzle diameter is potentially used in first layer
-                first_layer_min_nozzle_diameter = min_nozzle_diameter;
+                // if we don't have raft layers, any nozzle diameter THIS object uses is potentially used in first layer
+                first_layer_min_nozzle_diameter = object_min_nozzle_diameter;
             }
             if (initial_layer_print_height > first_layer_min_nozzle_diameter)
                 return {L("Layer height cannot exceed nozzle diameter."), object, "initial_layer_print_height"};
 
             // validate layer_height
             double layer_height = object->config().layer_height.value;
-            if (layer_height > min_nozzle_diameter)
+            if (layer_height > object_min_nozzle_diameter)
                 return {L("Layer height cannot exceed nozzle diameter."), object, "layer_height"};
 
             // Validate extrusion widths.
             std::string err_msg;
-            if (!validate_extrusion_width(object->config(), "line_width", layer_height, err_msg))
+            if (!validate_extrusion_width(object->config(), "line_width", layer_height, object_min_nozzle_diameter, object_max_nozzle_diameter, err_msg))
             	return {err_msg, object, "line_width"};
             if (object->has_support() || object->has_raft()) {
-                if (!validate_extrusion_width(object->config(), "support_line_width", layer_height, err_msg))
+                if (!validate_extrusion_width(object->config(), "support_line_width", layer_height, object_min_nozzle_diameter, object_max_nozzle_diameter, err_msg))
                     return {err_msg, object, "support_line_width"};
             }
             for (const char *opt_key : { "inner_wall_line_width", "outer_wall_line_width", "sparse_infill_line_width", "internal_solid_infill_line_width", "top_surface_line_width","skin_infill_line_width" ,"skeleton_infill_line_width"})
 				for (const PrintRegion &region : object->all_regions())
-                    if (!validate_extrusion_width(region.config(), opt_key, layer_height, err_msg))
+                    if (!validate_extrusion_width(region.config(), opt_key, layer_height, object_min_nozzle_diameter, object_max_nozzle_diameter, err_msg))
 		            	return  {err_msg, object, opt_key};
         }
     }
