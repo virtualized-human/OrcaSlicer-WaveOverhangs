@@ -1941,9 +1941,12 @@ void PrintObject::apply_wave_overhang_floor_layer_authority()
 // but misses stInternalBridge, because stInternalBridge sits above sparse infill (still material in lslices).
 // Users saw teal "Internal bridge" patches inside wave layers even with both flags on.
 //
-// Simpler, region-scoped semantics: when the user opts in by setting both flags, suppress ALL bridges in the
-// region. Reclassify stBottomBridge / stInternalBridge to stInternalSolid so the Fill pipeline uses regular
-// solid infill, which bonds cleanly with surrounding wave extrusions and uses the same flow model.
+// Coverage-scoped semantics: reclassify stBottomBridge / stInternalBridge to stInternalSolid ONLY where the
+// wave actually covers the surface (intersection with Layer::wave_overhang_covered_polygons). That solid bonds
+// cleanly with the surrounding wave extrusions and shares the flow model. Bridge area the wave does NOT cover
+// (a bridge the generator couldn't/didn't take, or a layer with no waves at all) is left as a real bridge,
+// instead of being turned into unsupported solid infill. Surfaces that straddle the wave boundary are split so
+// the covered part becomes solid and the rest stays a bridge.
 //
 // Runs AFTER apply_wave_overhang_floor_layer_authority. The authority pass's decisions stay where they land;
 // we only touch surfaces the authority pass kept as bridges.
@@ -1974,13 +1977,42 @@ void PrintObject::apply_wave_overhang_bridge_suppression()
                     m_print->throw_if_canceled();
                     Layer       *layer  = m_layers[idx_layer];
                     LayerRegion *layerm = layer->m_regions[region_id];
-                    Surfaces    &surfs  = layerm->fill_surfaces.surfaces;
+                    // Only suppress bridges where the wave actually covers them.
+                    // The wave-extrusion footprint for this layer; bridges inside it
+                    // are reclassified to solid so they bond with the wave, bridges
+                    // outside it (the wave couldn't or didn't reach them) stay real
+                    // bridges instead of becoming unsupported solid infill.
+                    const Polygons &wave_cover = layer->wave_overhang_covered_polygons;
+                    if (wave_cover.empty())
+                        continue; // nothing waved here -> leave every bridge as a bridge
+                    Surfaces &surfs = layerm->fill_surfaces.surfaces;
+                    Surfaces  rebuilt;
+                    rebuilt.reserve(surfs.size());
                     for (Surface &s : surfs) {
-                        if (s.surface_type == stBottomBridge || s.surface_type == stInternalBridge) {
-                            s.surface_type = stInternalSolid;
-                            s.bridge_angle = 0;
+                        if (s.surface_type != stBottomBridge && s.surface_type != stInternalBridge) {
+                            rebuilt.push_back(s);
+                            continue;
+                        }
+                        ExPolygons covered = intersection_ex(ExPolygons{ s.expolygon }, wave_cover);
+                        if (covered.empty()) {
+                            rebuilt.push_back(s); // not waved -> keep as bridge
+                            continue;
+                        }
+                        ExPolygons kept_bridge = diff_ex(ExPolygons{ s.expolygon }, wave_cover);
+                        for (ExPolygon &e : covered) {
+                            Surface ns       = s;
+                            ns.surface_type  = stInternalSolid;
+                            ns.bridge_angle  = 0;
+                            ns.expolygon     = std::move(e);
+                            rebuilt.push_back(std::move(ns));
+                        }
+                        for (ExPolygon &e : kept_bridge) {
+                            Surface ns   = s;     // same bridge type + angle preserved
+                            ns.expolygon = std::move(e);
+                            rebuilt.push_back(std::move(ns));
                         }
                     }
+                    surfs = std::move(rebuilt);
                 }
             });
         m_print->throw_if_canceled();
