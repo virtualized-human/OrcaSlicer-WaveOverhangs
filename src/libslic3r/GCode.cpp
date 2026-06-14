@@ -6579,9 +6579,15 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     if (speed == 0)
         speed = filament_max_volumetric_speed / _mm3_per_mm;
     if (this->on_first_layer()) {
-        //BBS: for solid infill of first layer, speed can be higher as long as
-        //wall lines have be attached
-        if (path.role() != erBottomSurface)
+        // Orca: per-object first-layer speed override. When set (>0) it applies to
+        // the WHOLE first layer — walls AND the bottom surface/infill — so the
+        // object's first layer prints at exactly this speed. Without it, keep the
+        // stock split (initial_layer_speed for walls, initial_layer_infill_speed for
+        // the bottom surface, which is left as set above).
+        const double obj_fls = m_config.object_initial_layer_speed.value;
+        if (obj_fls > 0)
+            speed = obj_fls;
+        else if (path.role() != erBottomSurface)
             speed = m_config.get_abs_value("initial_layer_speed");
     }
     else if(m_config.slow_down_layers > 1){

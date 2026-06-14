@@ -3156,6 +3156,21 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloatOrPercent(0., false));
 
+    def = this->add("object_initial_layer_line_width", coFloatOrPercent);
+    def->label = L("First layer line width (object override)");
+    def->category = L("Quality");
+    def->tooltip = L("Per-object override of the first layer line width. When greater than 0 it "
+                     "replaces the global 'First layer' line width for this object only. 0 = use the "
+                     "global value. If expressed as a %, it is computed over the nozzle diameter. "
+                     "Set it per object via the object's settings (right-click the object).");
+    def->sidetext = L("mm or %");
+    def->ratio_over = "nozzle_diameter";
+    def->min = 0;
+    def->max = 1000;
+    def->max_literal = 10;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloatOrPercent(0., false));
+
 
     def = this->add("initial_layer_print_height", coFloat);
     def->label = L("First layer height");
@@ -3164,6 +3179,19 @@ void PrintConfigDef::init_fff_params()
     def->sidetext = L("mm");	// milimeters, CIS languages need translation
     def->min = 0;
     def->set_default_value(new ConfigOptionFloat(0.2));
+
+    def = this->add("object_initial_layer_height", coFloat);
+    def->label = L("First layer height (object override)");
+    def->category = L("Quality");
+    def->tooltip = L("Per-object override of the first layer height. When greater than 0 it replaces the "
+                     "global 'First layer height' for this object only. 0 = use the global value. Set it "
+                     "per object via the object's settings (right-click the object). Note: with the prime "
+                     "tower enabled all objects must share the same layer heights, and it cannot exceed the "
+                     "nozzle diameter.");
+    def->sidetext = L("mm");
+    def->mode = comAdvanced;
+    def->min = 0;
+    def->set_default_value(new ConfigOptionFloat(0.0));
 
     //def = this->add("adaptive_layer_height", coBool);
     //def->label = L("Adaptive layer height");
@@ -3180,6 +3208,17 @@ void PrintConfigDef::init_fff_params()
     def->min = 1;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(30));
+
+    def = this->add("object_initial_layer_speed", coFloat);
+    def->label = L("First layer speed (object override)");
+    def->category = L("Speed");
+    def->tooltip = L("Per-object override of the first layer print speed. When greater than 0 it "
+                     "replaces the global 'First layer' speed for this object only. 0 = use the global "
+                     "value. Set it per object via the object's settings (right-click the object).");
+    def->sidetext = L("mm/s");
+    def->mode = comAdvanced;
+    def->min = 0;
+    def->set_default_value(new ConfigOptionFloat(0.0));
 
     def = this->add("initial_layer_infill_speed", coFloat);
     def->label = L("First layer infill");

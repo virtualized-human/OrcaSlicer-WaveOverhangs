@@ -925,6 +925,15 @@ PRINT_CONFIG_CLASS_DEFINE(
     // Force the generation of solid shells between adjacent materials/volumes.
     ((ConfigOptionBool,                interface_shells))
     ((ConfigOptionFloat,               layer_height))
+    // Orca: per-object override for the first layer height. 0 = inherit the global
+    // initial_layer_print_height (which itself falls back to layer_height).
+    ((ConfigOptionFloat,               object_initial_layer_height))
+    // Orca: per-object override for the first layer print speed (mm/s).
+    // 0 = inherit the global initial_layer_speed.
+    ((ConfigOptionFloat,               object_initial_layer_speed))
+    // Orca: per-object override for the first layer line width (mm or %, % over
+    // nozzle diameter). 0 = inherit the global initial_layer_line_width.
+    ((ConfigOptionFloatOrPercent,      object_initial_layer_line_width))
     ((ConfigOptionFloat,               mmu_segmented_region_max_width))
     ((ConfigOptionFloat,               mmu_segmented_region_interlocking_depth))
     ((ConfigOptionFloat,               raft_contact_distance))

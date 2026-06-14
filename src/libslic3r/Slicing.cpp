@@ -66,8 +66,12 @@ SlicingParameters SlicingParameters::create_from_config(
      const std::vector<unsigned int> &object_extruders,
      const Vec3d                     &object_shrinkage_compensation)
 {
-    coordf_t initial_layer_print_height                      = (print_config.initial_layer_print_height.value <= 0) ? 
-        object_config.layer_height.value : print_config.initial_layer_print_height.value;
+    // Orca: per-object first-layer height override takes priority; then the global
+    // initial_layer_print_height; then fall back to the object's layer height.
+    coordf_t initial_layer_print_height =
+        (object_config.object_initial_layer_height.value > 0) ? object_config.object_initial_layer_height.value :
+        ((print_config.initial_layer_print_height.value <= 0) ?
+            object_config.layer_height.value : print_config.initial_layer_print_height.value);
     // If object_config.support_filament == 0 resp. object_config.support_interface_filament == 0,
     // print_config.nozzle_diameter.get_at(size_t(-1)) returns the 0th nozzle diameter,
     // which is consistent with the requirement that if support_filament == 0 resp. support_interface_filament == 0,
