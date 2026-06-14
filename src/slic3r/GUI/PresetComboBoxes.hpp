@@ -13,6 +13,9 @@
 #include "GUI_Utils.hpp"
 #include "EncodedFilament.hpp"
 
+#include <string>
+#include <utility>
+
 class wxString;
 class wxTextCtrl;
 class wxStaticText;
@@ -225,6 +228,7 @@ class TabPresetComboBox : public PresetComboBox
 {
     bool show_incompatible {false};
     bool m_enable_all {false};
+    std::string m_forced_selected_preset;
 
 public:
     TabPresetComboBox(wxWindow *parent, Preset::Type preset_type);
@@ -240,6 +244,7 @@ public:
     void OnSelect(wxCommandEvent& evt) override;
 
     void set_enable_all(bool enable=true) { m_enable_all = enable; }
+    void set_forced_selected_preset(std::string preset_name) { m_forced_selected_preset = std::move(preset_name); }
 
     PresetCollection*   presets()   const { return m_collection; }
     Preset::Type        type()      const { return m_type; }

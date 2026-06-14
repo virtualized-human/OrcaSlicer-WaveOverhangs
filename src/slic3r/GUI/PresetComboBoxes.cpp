@@ -1596,6 +1596,7 @@ void TabPresetComboBox::update()
     /*if (!presets.front().is_visible)
         set_label_marker(Append(separator(L("System presets")), wxNullBitmap));*/
     size_t idx_selected = m_collection->get_selected_idx();
+    const bool use_forced_selection = !m_forced_selected_preset.empty();
 
     if (m_type == Preset::TYPE_PRINTER && m_preset_bundle->physical_printers.has_selection()) {
         std::string sel_preset_name = m_preset_bundle->physical_printers.get_selected_printer_preset_name();
@@ -1623,7 +1624,7 @@ void TabPresetComboBox::update()
         if (preset.is_default || preset.is_system) {
             //BBS: move system to the end
             system_presets.emplace(name, std::pair<wxBitmap *, bool>(bmp, is_enabled));
-            if (i == idx_selected)
+            if ((use_forced_selection && preset.name == m_forced_selected_preset) || (!use_forced_selection && i == idx_selected))
                 selected = name;
             //int item_id = Append(get_preset_name(preset), *bmp);
             //if (!is_enabled)
@@ -1635,14 +1636,14 @@ void TabPresetComboBox::update()
         {
             //std::pair<wxBitmap*, bool> pair(bmp, is_enabled);
             project_embedded_presets.emplace(name, std::pair<wxBitmap *, bool>(bmp, is_enabled));
-            if (i == idx_selected)
+            if ((use_forced_selection && preset.name == m_forced_selected_preset) || (!use_forced_selection && i == idx_selected))
                 selected = name;
         }
         else
         {
             std::pair<wxBitmap*, bool> pair(bmp, is_enabled);
             nonsys_presets.emplace(name, std::pair<wxBitmap *, bool>(bmp, is_enabled));
-            if (i == idx_selected)
+            if ((use_forced_selection && preset.name == m_forced_selected_preset) || (!use_forced_selection && i == idx_selected))
                 selected = name;
         }
         //BBS: move system to the end

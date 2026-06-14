@@ -438,6 +438,9 @@ public:
     void copy_settings_to_clipboard();
     void paste_settings_into_list();
     bool can_paste_settings_into_list();
+    void apply_process_preset_to_selection();
+    void save_selection_as_process_preset();
+    void reset_object_process_overrides();
     bool clipboard_is_empty() const { return m_clipboard.empty(); }
     void paste_volumes_into_list(int obj_idx, const ModelVolumePtrs& volumes);
     void paste_objects_into_list(const std::vector<size_t>& object_idxs);

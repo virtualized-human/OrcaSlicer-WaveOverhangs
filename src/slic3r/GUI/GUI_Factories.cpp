@@ -2077,6 +2077,47 @@ void MenuFactory::append_menu_item_per_object_process(wxMenu* menu)
             return wxGetApp().obj_list()->can_paste_settings_into_list();
         },
         m_parent);
+
+    menu->AppendSeparator();
+
+    append_menu_item(menu, wxID_ANY, _L("Apply Process Preset"), _L("Apply a saved process preset to the selected objects"),
+        [](wxCommandEvent &) {
+            wxGetApp().obj_list()->apply_process_preset_to_selection();
+        }, "", nullptr,
+        []() {
+            Selection &selection = plater()->canvas3D()->get_selection();
+            return selection.is_single_full_object() ||
+                selection.is_multiple_full_object() ||
+                selection.is_single_full_instance() ||
+                selection.is_multiple_full_instance() ||
+                selection.is_single_volume() ||
+                selection.is_multiple_volume();
+        }, m_parent);
+
+    append_menu_item(menu, wxID_ANY, _L("Save Object as Process Preset"), _L("Create a new process preset from the selected object's overrides"),
+        [](wxCommandEvent &) {
+            wxGetApp().obj_list()->save_selection_as_process_preset();
+        }, "", nullptr,
+        []() {
+            Selection &selection = plater()->canvas3D()->get_selection();
+            return selection.is_single_full_object() ||
+                selection.is_single_full_instance() ||
+                selection.is_single_volume_or_modifier();
+        }, m_parent);
+
+    append_menu_item(menu, wxID_ANY, _L("Reset Object Process Overrides"), _L("Remove all per-object process overrides from the selected objects"),
+        [](wxCommandEvent &) {
+            wxGetApp().obj_list()->reset_object_process_overrides();
+        }, "", nullptr,
+        []() {
+            Selection &selection = plater()->canvas3D()->get_selection();
+            return selection.is_single_full_object() ||
+                selection.is_multiple_full_object() ||
+                selection.is_single_full_instance() ||
+                selection.is_multiple_full_instance() ||
+                selection.is_single_volume() ||
+                selection.is_multiple_volume();
+        }, m_parent);
 }
 
 void MenuFactory::append_menu_item_per_object_settings(wxMenu* menu)

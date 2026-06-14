@@ -366,8 +366,10 @@ public:
     ModelVolumePtrs         volumes;
     // Configuration parameters specific to a single ModelObject, overriding the global Slic3r settings.
     ModelConfigObject 		config;
+    std::string             process_preset_name;
     // Variation of a layer thickness for spans of Z coordinates + optional parameter overrides.
     t_layer_config_ranges   layer_config_ranges;
+    std::map<t_layer_height_range, std::string> layer_config_ranges_process_preset;
     // Profile of increasing z to a layer height, to be linearly interpolated when calculating the layers.
     // The pairs of <z, layer_height> are packed into a 1D array.
     LayerHeightProfile      layer_height_profile;
@@ -678,7 +680,8 @@ private:
         ar(cereal::base_class<ObjectBase>(this));
         Internal::StaticSerializationWrapper<ModelConfigObject const> config_wrapper(config);
         Internal::StaticSerializationWrapper<LayerHeightProfile const> layer_heigth_profile_wrapper(layer_height_profile);
-        ar(name, module_name, input_file, instances, volumes, config_wrapper, layer_config_ranges, layer_heigth_profile_wrapper,
+        ar(name, module_name, input_file, instances, volumes, config_wrapper, process_preset_name,
+            layer_config_ranges, layer_config_ranges_process_preset, layer_heigth_profile_wrapper,
             sla_support_points, sla_points_status, sla_drain_holes, printable, origin_translation, brim_points,
             m_bounding_box_approx, m_bounding_box_approx_valid, 
             m_bounding_box_exact, m_bounding_box_exact_valid, m_min_max_z_valid,
@@ -691,7 +694,8 @@ private:
         Internal::StaticSerializationWrapper<LayerHeightProfile> layer_heigth_profile_wrapper(layer_height_profile);
         // BBS: add backup, check modify
         SaveObjectGaurd gaurd(*this);
-        ar(name, module_name, input_file, instances, volumes, config_wrapper, layer_config_ranges, layer_heigth_profile_wrapper,
+        ar(name, module_name, input_file, instances, volumes, config_wrapper, process_preset_name,
+            layer_config_ranges, layer_config_ranges_process_preset, layer_heigth_profile_wrapper,
             sla_support_points, sla_points_status, sla_drain_holes, printable, origin_translation, brim_points,
             m_bounding_box_approx, m_bounding_box_approx_valid, 
             m_bounding_box_exact, m_bounding_box_exact_valid, m_min_max_z_valid,
@@ -863,6 +867,7 @@ public:
     // Configuration parameters specific to an object model geometry or a modifier volume, 
     // overriding the global Slic3r settings and the ModelObject settings.
     ModelConfigObject	config;
+    std::string         process_preset_name;
 
     // List of mesh facets to be supported/unsupported.
     FacetsAnnotation    supported_facets;
@@ -1099,7 +1104,7 @@ private:
     ModelVolume(ModelObject *object, const ModelVolume &other) :
         ObjectBase(other),
         name(other.name), source(other.source), m_mesh(other.m_mesh), m_convex_hull(other.m_convex_hull),
-        config(other.config), m_type(other.m_type), object(object), m_transformation(other.m_transformation),
+        config(other.config), process_preset_name(other.process_preset_name), m_type(other.m_type), object(object), m_transformation(other.m_transformation),
         supported_facets(other.supported_facets), seam_facets(other.seam_facets), mmu_segmentation_facets(other.mmu_segmentation_facets),
         fuzzy_skin_facets(other.fuzzy_skin_facets), cut_info(other.cut_info), text_configuration(other.text_configuration), emboss_shape(other.emboss_shape)
     {
@@ -1123,7 +1128,7 @@ private:
     }
     // Providing a new mesh, therefore this volume will get a new unique ID assigned.
     ModelVolume(ModelObject *object, const ModelVolume &other, TriangleMesh &&mesh) :
-        name(other.name), source(other.source), config(other.config), object(object), m_mesh(new TriangleMesh(std::move(mesh))), m_type(other.m_type), m_transformation(other.m_transformation),
+        name(other.name), source(other.source), config(other.config), process_preset_name(other.process_preset_name), object(object), m_mesh(new TriangleMesh(std::move(mesh))), m_type(other.m_type), m_transformation(other.m_transformation),
         cut_info(other.cut_info), text_configuration(other.text_configuration), emboss_shape(other.emboss_shape)
     {
 		assert(this->id().valid()); 
@@ -1188,6 +1193,7 @@ private:
         cereal::load_by_value(ar, fuzzy_skin_facets);
         mesh_changed |= t != fuzzy_skin_facets.timestamp();
         cereal::load_by_value(ar, config);
+        ar(process_preset_name);
         cereal::load(ar, text_configuration);
         cereal::load(ar, emboss_shape);
 		assert(m_mesh);
@@ -1209,6 +1215,7 @@ private:
         cereal::save_by_value(ar, mmu_segmentation_facets);
         cereal::save_by_value(ar, fuzzy_skin_facets);
         cereal::save_by_value(ar, config);
+        ar(process_preset_name);
         cereal::save(ar, text_configuration);
         cereal::save(ar, emboss_shape);
 		if (has_convex_hull)

@@ -1,6 +1,7 @@
 #include "../libslic3r.h"
 #include "../Exception.hpp"
 #include "../Model.hpp"
+#include "../ObjectProcessPreset.hpp"
 #include "../Preset.hpp"
 #include "../Utils.hpp"
 #include "../LocalesUtils.hpp"
@@ -873,6 +874,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         //typedef std::map<Id, Geometry> IdToGeometryMap;
         typedef std::map<int, std::vector<coordf_t>> IdToLayerHeightsProfileMap;
         typedef std::map<int, t_layer_config_ranges> IdToLayerConfigRangesMap;
+        typedef std::map<int, std::map<t_layer_height_range, std::string>> IdToLayerProcessPresetsMap;
         typedef std::map<int, BrimPoints>             IdToBrimPointsMap;
         /*typedef std::map<int, std::vector<sla::SupportPoint>> IdToSlaSupportPointsMap;
         typedef std::map<int, std::vector<sla::DrainHole>> IdToSlaDrainHolesMap;*/
@@ -1066,6 +1068,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         IdToCutObjectInfoMap       m_cut_object_infos;
         IdToLayerHeightsProfileMap m_layer_heights_profiles;
         IdToLayerConfigRangesMap m_layer_config_ranges;
+        IdToLayerProcessPresetsMap m_layer_process_presets;
         IdToBrimPointsMap m_brim_ear_points;
         /*IdToSlaSupportPointsMap m_sla_support_points;
         IdToSlaDrainHolesMap    m_sla_drain_holes;*/
@@ -1294,6 +1297,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         m_objects.clear();
         m_instances.clear();
         m_objects_metadata.clear();
+        m_layer_process_presets.clear();
         m_curr_metadata_name.clear();
         m_curr_characters.clear();
 
@@ -1335,6 +1339,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         m_objects_metadata.clear();
         m_layer_heights_profiles.clear();
         m_layer_config_ranges.clear();
+        m_layer_process_presets.clear();
         m_brim_ear_points.clear();
         //m_sla_support_points.clear();
         m_curr_metadata_name.clear();
@@ -2019,6 +2024,10 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             if (obj_layer_config_ranges != m_layer_config_ranges.end())
                 model_object->layer_config_ranges = std::move(obj_layer_config_ranges->second);
 
+            IdToLayerProcessPresetsMap::iterator obj_layer_process_presets = m_layer_process_presets.find(object.second + 1);
+            if (obj_layer_process_presets != m_layer_process_presets.end())
+                model_object->layer_config_ranges_process_preset = std::move(obj_layer_process_presets->second);
+
             IdToBrimPointsMap::iterator obj_brim_points = m_brim_ear_points.find(object.second + 1);
             if (obj_brim_points != m_brim_ear_points.end())
                 model_object->brim_points = std::move(obj_brim_points->second);
@@ -2052,6 +2061,8 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     //BBS: add module name
                     else if (metadata.key == "module")
                         model_object->module_name = metadata.value;
+                    else if (metadata.key == OBJECT_PROCESS_PRESET_KEY)
+                        model_object->process_preset_name = metadata.value;
                     else
                         model_object->config.set_deserialize(metadata.key, metadata.value, config_substitutions);
                 }
@@ -2831,6 +2842,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                 }
 
                 t_layer_config_ranges config_ranges;
+                std::map<t_layer_height_range, std::string> layer_process_presets;
 
                 for (const auto& range : object_tree) {
                     if (range.first != "range")
@@ -2838,6 +2850,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     pt::ptree range_tree = range.second;
                     double min_z = range_tree.get<double>("<xmlattr>.min_z");
                     double max_z = range_tree.get<double>("<xmlattr>.max_z");
+                    std::string process_preset_name = range_tree.get<std::string>(std::string("<xmlattr>.") + OBJECT_PROCESS_PRESET_KEY, "");
 
                     // get Z range information
                     DynamicPrintConfig config;
@@ -2851,11 +2864,17 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                         config.set_deserialize(opt_key, value, config_substitutions);
                     }
 
-                    config_ranges[{ min_z, max_z }].assign_config(std::move(config));
+                    t_layer_height_range layer_range{ min_z, max_z };
+                    config_ranges[layer_range].assign_config(std::move(config));
+                    if (!process_preset_name.empty())
+                        layer_process_presets[layer_range] = process_preset_name;
                 }
 
-                if (!config_ranges.empty())
+                if (!config_ranges.empty()) {
                     m_layer_config_ranges.insert({ obj_idx, std::move(config_ranges) });
+                    if (!layer_process_presets.empty())
+                        m_layer_process_presets.insert({ obj_idx, std::move(layer_process_presets) });
+                }
             }
         }
     }
@@ -4915,6 +4934,8 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             for (const Metadata& metadata : volume_data->metadata) {
                 if (metadata.key == NAME_KEY)
                     volume->name = metadata.value;
+                else if (metadata.key == OBJECT_PROCESS_PRESET_KEY)
+                    volume->process_preset_name = metadata.value;
                 //else if ((metadata.key == MODIFIER_KEY) && (metadata.value == "1"))
 				//	volume->set_type(ModelVolumeType::PARAMETER_MODIFIER);
 				//for old format
@@ -7348,6 +7369,9 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     // store minX and maxZ
                     range_tree.put("<xmlattr>.min_z", range.first.first);
                     range_tree.put("<xmlattr>.max_z", range.first.second);
+                    auto preset_it = object->layer_config_ranges_process_preset.find(range.first);
+                    if (preset_it != object->layer_config_ranges_process_preset.end() && !preset_it->second.empty())
+                        range_tree.put(std::string("<xmlattr>.") + OBJECT_PROCESS_PRESET_KEY, preset_it->second);
 
                     // store range configuration
                     const ModelConfig& config = range.second;
@@ -7619,6 +7643,10 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                 if (!obj->module_name.empty())
                     stream << "    <" << METADATA_TAG << " " << KEY_ATTR << "=\"module\" " << VALUE_ATTR << "=\"" << xml_escape(obj->module_name) << "\"/>\n";
 
+                if (!obj->process_preset_name.empty())
+                    stream << "    <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << OBJECT_PROCESS_PRESET_KEY << "\" "
+                           << VALUE_ATTR << "=\"" << xml_escape(obj->process_preset_name) << "\"/>\n";
+
                 // stores object's config data
                 for (const std::string& key : obj->config.keys()) {
                     stream << "    <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << key << "\" " << VALUE_ATTR << "=\"" << obj->config.opt_serialize(key) << "\"/>\n";
@@ -7645,6 +7673,10 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                             if (!volume->name.empty())
                                 stream << "      <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << NAME_KEY << "\" " << VALUE_ATTR << "=\"" << xml_escape(volume->name) << "\"/>\n";
                                 //stream << "      <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << NAME_KEY << "\" " << VALUE_ATTR << "=\"" << xml_escape(volume->name) << "\"/>\n";
+
+                            if (!volume->process_preset_name.empty())
+                                stream << "      <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << OBJECT_PROCESS_PRESET_KEY << "\" "
+                                       << VALUE_ATTR << "=\"" << xml_escape(volume->process_preset_name) << "\"/>\n";
 
                             // stores volume's modifier field (legacy, to support old slicers)
                             /*if (volume->is_modifier())

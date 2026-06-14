@@ -18,6 +18,8 @@
 #include "Widgets/Button.hpp"
 #include "GUI_Factories.hpp"
 
+#include <algorithm>
+
 
 namespace Slic3r {
 namespace GUI {
@@ -723,6 +725,12 @@ void ParamsPanel::notify_object_config_changed()
     auto & model = wxGetApp().model();
     bool has_config = false;
     for (auto obj : model.objects) {
+        if (!obj->process_preset_name.empty() ||
+            std::any_of(obj->layer_config_ranges_process_preset.begin(), obj->layer_config_ranges_process_preset.end(),
+                [](const auto &item) { return !item.second.empty(); })) {
+            has_config = true;
+            break;
+        }
         if (!obj->config.empty()) {
             SettingsFactory::Bundle cat_options = SettingsFactory::get_bundle(&obj->config.get(), true);
             if (cat_options.size() > 0) {
@@ -731,6 +739,10 @@ void ParamsPanel::notify_object_config_changed()
             }
         }
         for (auto volume : obj->volumes) {
+            if (!volume->process_preset_name.empty()) {
+                has_config = true;
+                break;
+            }
             if (!volume->config.empty()) {
                 SettingsFactory::Bundle cat_options = SettingsFactory::get_bundle(&volume->config.get(), true);
                 if (cat_options.size() > 0) {

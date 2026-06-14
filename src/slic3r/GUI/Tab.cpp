@@ -6,6 +6,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Model.hpp"
+#include "libslic3r/ObjectProcessPreset.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
 
 #include "Search.hpp"
@@ -203,10 +204,13 @@ void Tab::create_preset_tab()
     panel->SetSizer(sizer);
 #endif //__WXOSX__*/
 
+    auto model_process_tab = dynamic_cast<TabPrintModel*>(this);
+    const bool use_process_preset_combo = model_process_tab != nullptr && model_process_tab->has_process_preset_combo();
+
     // BBS: model config
-    if (m_type < Preset::TYPE_COUNT) {
+    if (m_type < Preset::TYPE_COUNT || use_process_preset_combo) {
         // preset chooser
-        m_presets_choice = new TabPresetComboBox(panel, m_type);
+        m_presets_choice = new TabPresetComboBox(panel, use_process_preset_combo ? Preset::TYPE_PRINT : m_type);
         // m_presets_choice->SetFont(Label::Body_10); // BBS
         m_presets_choice->set_selection_changed_function([this](int selection) {
             if (!m_presets_choice->selection_is_changed_according_to_physical_printers())
@@ -216,7 +220,11 @@ void Tab::create_preset_tab()
 
                 // select preset
                 std::string preset_name = m_presets_choice->GetString(selection).ToUTF8().data();
-                select_preset(Preset::remove_suffix_modified(preset_name));
+                preset_name = Preset::remove_suffix_modified(preset_name);
+                if (auto model_tab = dynamic_cast<TabPrintModel*>(this); model_tab != nullptr && model_tab->has_process_preset_combo())
+                    model_tab->select_process_preset(preset_name);
+                else
+                    select_preset(preset_name);
             }
         });
     }
@@ -249,6 +257,8 @@ void Tab::create_preset_tab()
     //m_btn_compare_preset->SetToolTip(_L("Compare presets"));
     // TRN "Save current Settings"
     m_btn_save_preset->SetToolTip(wxString::Format(_L("Save current %s"), m_title));
+    if (use_process_preset_combo)
+        m_btn_save_preset->SetToolTip(_L("Save selected object settings as a process preset"));
     m_btn_delete_preset->SetToolTip(_(L("Delete this preset")));
     m_btn_delete_preset->Hide();
 
@@ -309,7 +319,7 @@ void Tab::create_preset_tab()
         if (m_presets_choice) m_presets_choice->Show();
 
         m_btn_save_preset->Show();
-        m_btn_delete_preset->Show(); // ORCA: fixes delete preset button visible while search box focused
+        update_btns_enabling(); // ORCA: fixes delete preset button visible while search box focused
         m_undo_btn->Show();          // ORCA: fixes revert preset button visible while search box focused
         m_btn_search->Show();
         m_search_item->Hide();
@@ -541,7 +551,12 @@ void Tab::create_preset_tab()
     m_hsizer->Add(m_page_view, 1, wxEXPAND | wxLEFT, 5);*/
 
     //m_btn_compare_preset->Bind(wxEVT_BUTTON, ([this](wxCommandEvent e) { compare_preset(); }));
-    m_btn_save_preset->Bind(wxEVT_BUTTON, ([this](wxCommandEvent& e) { save_preset(); }));
+    m_btn_save_preset->Bind(wxEVT_BUTTON, ([this](wxCommandEvent& e) {
+        if (auto model_tab = dynamic_cast<TabPrintModel*>(this); model_tab != nullptr && model_tab->has_process_preset_combo())
+            model_tab->save_process_preset();
+        else
+            save_preset();
+    }));
     m_btn_delete_preset->Bind(wxEVT_BUTTON, ([this](wxCommandEvent& e) { delete_preset(); }));
     /*m_btn_hide_incompatible_presets->Bind(wxEVT_BUTTON, ([this](wxCommandEvent e) {
         toggle_show_hide_incompatible();
@@ -1226,8 +1241,12 @@ void Tab::update_dirty()
         return;
 
     if (m_presets_choice) {
-        m_presets_choice->update_dirty();
-        on_presets_changed();
+        if (auto model_tab = dynamic_cast<TabPrintModel*>(this); model_tab != nullptr && model_tab->has_process_preset_combo())
+            model_tab->update_process_preset_choice();
+        else {
+            m_presets_choice->update_dirty();
+            on_presets_changed();
+        }
     } else {
         m_presets->update_dirty();
     }
@@ -1237,7 +1256,10 @@ void Tab::update_dirty()
 void Tab::update_tab_ui(bool update_plater_presets)
 {
     if (m_presets_choice) {
-        m_presets_choice->update();
+        if (auto model_tab = dynamic_cast<TabPrintModel*>(this); model_tab != nullptr && model_tab->has_process_preset_combo())
+            model_tab->update_process_preset_choice();
+        else
+            m_presets_choice->update();
         if (update_plater_presets)
             on_presets_changed();
     }
@@ -1457,8 +1479,12 @@ void Tab::load_key_value(const std::string& opt_key, const boost::any& value, bo
         // Don't select another profile if this profile happens to become incompatible.
         m_preset_bundle->update_compatible(PresetSelectCompatibleType::Never);
     }
-    if (m_presets_choice)
-        m_presets_choice->update_dirty();
+    if (m_presets_choice) {
+        if (auto model_tab = dynamic_cast<TabPrintModel*>(this); model_tab != nullptr && model_tab->has_process_preset_combo())
+            model_tab->update_process_preset_choice();
+        else
+            m_presets_choice->update_dirty();
+    }
     on_presets_changed();
     update();
 }
@@ -2285,12 +2311,10 @@ void TabPrint::build()
         auto optgroup = page->new_optgroup(L("Layer height"), L"param_layer_height");
         optgroup->append_single_option_line("layer_height","quality_settings_layer_height");
         optgroup->append_single_option_line("initial_layer_print_height","quality_settings_layer_height");
-        optgroup->append_single_option_line("object_initial_layer_height","quality_settings_layer_height");
 
         optgroup = page->new_optgroup(L("Line width"), L"param_line_width");
         optgroup->append_single_option_line("line_width","quality_settings_line_width");
         optgroup->append_single_option_line("initial_layer_line_width","quality_settings_line_width");
-        optgroup->append_single_option_line("object_initial_layer_line_width","quality_settings_line_width");
         optgroup->append_single_option_line("outer_wall_line_width","quality_settings_line_width");
         optgroup->append_single_option_line("inner_wall_line_width","quality_settings_line_width");
         optgroup->append_single_option_line("top_surface_line_width","quality_settings_line_width");
@@ -2531,7 +2555,6 @@ void TabPrint::build()
     page = add_options_page(L("Speed"), "custom-gcode_speed"); // ORCA: icon only visible on placeholders
         optgroup = page->new_optgroup(L("First layer speed"), L"param_speed_first", 15);
         optgroup->append_single_option_line("initial_layer_speed", "speed_settings_initial_layer_speed#initial-layer");
-        optgroup->append_single_option_line("object_initial_layer_speed", "speed_settings_initial_layer_speed#initial-layer");
         optgroup->append_single_option_line("initial_layer_infill_speed", "speed_settings_initial_layer_speed#initial-layer-infill");
         optgroup->append_single_option_line("initial_layer_travel_speed", "speed_settings_initial_layer_speed#initial-layer-travel-speed");
         optgroup->append_single_option_line("slow_down_layers", "speed_settings_initial_layer_speed#number-of-slow-layers");
@@ -3012,6 +3035,266 @@ static std::vector<std::string> variant_keys(DynamicPrintConfig const & config)
     return t;
 }
 
+static bool tab_targets_objects(const TabPrintModel *tab)
+{
+    return dynamic_cast<const TabPrintObject*>(tab) != nullptr;
+}
+
+static bool tab_targets_parts(const TabPrintModel *tab)
+{
+    return dynamic_cast<const TabPrintPart*>(tab) != nullptr;
+}
+
+static bool tab_targets_layers(const TabPrintModel *tab)
+{
+    return dynamic_cast<const TabPrintLayer*>(tab) != nullptr;
+}
+
+static bool find_layer_range_for_config(ModelConfig *config, ModelObject **out_object, t_layer_height_range *out_range)
+{
+    if (config == nullptr)
+        return false;
+
+    for (ModelObject *object : wxGetApp().model().objects) {
+        for (auto &range : object->layer_config_ranges) {
+            if (&range.second == config) {
+                if (out_object)
+                    *out_object = object;
+                if (out_range)
+                    *out_range = range.first;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static std::string process_preset_name_for_target(const TabPrintModel *tab, ObjectBase *object, ModelConfig *config)
+{
+    if (tab_targets_objects(tab))
+        return static_cast<ModelObject*>(object)->process_preset_name;
+    if (tab_targets_parts(tab))
+        return static_cast<ModelVolume*>(object)->process_preset_name;
+    if (tab_targets_layers(tab)) {
+        ModelObject *model_object = nullptr;
+        t_layer_height_range range;
+        if (find_layer_range_for_config(config, &model_object, &range)) {
+            auto it = model_object->layer_config_ranges_process_preset.find(range);
+            if (it != model_object->layer_config_ranges_process_preset.end())
+                return it->second;
+        }
+    }
+    return {};
+}
+
+static void set_process_preset_name_for_target(TabPrintModel *tab, ObjectBase *object, ModelConfig *config, const std::string &preset_name)
+{
+    if (tab_targets_objects(tab)) {
+        static_cast<ModelObject*>(object)->process_preset_name = preset_name;
+    } else if (tab_targets_parts(tab)) {
+        static_cast<ModelVolume*>(object)->process_preset_name = preset_name;
+    } else if (tab_targets_layers(tab)) {
+        ModelObject *model_object = nullptr;
+        t_layer_height_range range;
+        if (find_layer_range_for_config(config, &model_object, &range)) {
+            if (preset_name.empty())
+                model_object->layer_config_ranges_process_preset.erase(range);
+            else
+                model_object->layer_config_ranges_process_preset[range] = preset_name;
+        }
+    }
+
+    if (config)
+        config->touch();
+}
+
+static std::string common_process_preset_name(const TabPrintModel *tab, const std::map<ObjectBase *, ModelConfig *> &object_configs)
+{
+    std::string common;
+    bool first = true;
+    for (const auto &target : object_configs) {
+        std::string name = process_preset_name_for_target(tab, target.first, target.second);
+        if (first) {
+            common = std::move(name);
+            first = false;
+        } else if (common != name) {
+            return {};
+        }
+    }
+    return common;
+}
+
+static bool process_overrides_match(
+    const DynamicPrintConfig &actual,
+    const DynamicPrintConfig &expected)
+{
+    return actual.diff(expected).empty() && expected.diff(actual).empty();
+}
+
+static bool process_preset_is_modified_for_targets(
+    const TabPrintModel *tab,
+    const std::map<ObjectBase *, ModelConfig *> &object_configs,
+    const std::string &preset_name)
+{
+    PresetCollection &prints = wxGetApp().preset_bundle->prints;
+    Preset *preset = prints.find_preset(preset_name, false, true);
+    if (preset == nullptr)
+        return !object_configs.empty();
+
+    const bool object_target = tab_targets_objects(tab);
+    const DynamicPrintConfig &global_baseline = prints.get_edited_preset().config;
+    const DynamicPrintConfig &process_config =
+        (preset->name == prints.get_selected_preset().name) ? prints.get_edited_preset().config : preset->config;
+    const DynamicPrintConfig expected = object_target ?
+        apply_process_preset_to_object(process_config, global_baseline).object_overrides :
+        apply_process_preset_to_region(process_config, global_baseline).object_overrides;
+
+    for (const auto &target : object_configs) {
+        const std::string target_name = process_preset_name_for_target(tab, target.first, target.second);
+        if (!target_name.empty() && target_name != preset_name)
+            return true;
+
+        DynamicPrintConfig actual = extract_object_process_overrides(target.second->get(), global_baseline, object_target);
+        if (!process_overrides_match(actual, expected))
+            return true;
+    }
+
+    return false;
+}
+
+static void set_selected_process_combo_label(TabPresetComboBox *combo, const std::string &preset_name, bool dirty)
+{
+    if (combo == nullptr)
+        return;
+
+    int selection = combo->GetSelection();
+    if (selection == wxNOT_FOUND)
+        return;
+
+    std::string label = (dirty ? Preset::suffix_modified() : std::string()) + preset_name;
+    combo->SetString(selection, from_u8(label));
+    combo->SetToolTip(from_u8(label));
+}
+
+void TabPrintModel::select_process_preset(const std::string &preset_name)
+{
+    if (m_object_configs.empty())
+        return;
+
+    PresetCollection &prints = wxGetApp().preset_bundle->prints;
+    Preset *preset = prints.find_preset(preset_name, false, true);
+    if (preset == nullptr) {
+        update_process_preset_choice();
+        return;
+    }
+
+    const bool object_target = tab_targets_objects(this);
+    const DynamicPrintConfig &global_baseline = prints.get_edited_preset().config;
+    const DynamicPrintConfig &process_config =
+        (preset->name == prints.get_selected_preset().name) ? prints.get_edited_preset().config : preset->config;
+    const ObjectProcessPresetResult result = object_target ?
+        apply_process_preset_to_object(process_config, global_baseline) :
+        apply_process_preset_to_region(process_config, global_baseline);
+
+    wxGetApp().plater()->take_snapshot("Apply Process Preset");
+
+    for (auto &target : m_object_configs) {
+        erase_process_overrides(*target.second, object_target);
+        target.second->apply(result.object_overrides, true);
+        set_process_preset_name_for_target(this, target.first, target.second, preset->name);
+        notify_changed(target.first);
+    }
+
+    update_model_config();
+    wxGetApp().params_panel()->notify_object_config_changed();
+    wxGetApp().mainframe->on_config_changed(m_config);
+}
+
+void TabPrintModel::save_process_preset()
+{
+    if (m_object_configs.empty())
+        return;
+
+    if (m_object_configs.size() != 1) {
+        wxMessageBox(_L("Select a single object, part, or layer range to save it as a process preset."),
+                     _L("Save Object as Process Preset"), wxOK | wxICON_INFORMATION);
+        return;
+    }
+
+    auto target = m_object_configs.begin();
+    const bool object_target = tab_targets_objects(this);
+    const DynamicPrintConfig &global_baseline = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+
+    DynamicPrintConfig local_config;
+    if (!object_target) {
+        if (tab_targets_parts(this)) {
+            local_config.apply(static_cast<ModelVolume*>(target->first)->get_object()->config.get(), true);
+        } else if (tab_targets_layers(this)) {
+            ModelObject *model_object = nullptr;
+            if (find_layer_range_for_config(target->second, &model_object, nullptr) && model_object)
+                local_config.apply(model_object->config.get(), true);
+        }
+    }
+    local_config.apply(target->second->get(), true);
+
+    DynamicPrintConfig built_config = object_target ?
+        build_process_preset_from_object(global_baseline, local_config) :
+        build_process_preset_from_region(global_baseline, local_config);
+
+    SavePresetDialog dlg(wxGetApp().mainframe, Preset::TYPE_PRINT);
+    if (dlg.ShowModal() != wxID_OK)
+        return;
+
+    std::string name = dlg.get_name();
+    if (name.empty())
+        return;
+
+    bool save_to_project = dlg.get_save_to_project_selection(Preset::TYPE_PRINT);
+
+    PresetCollection &prints = wxGetApp().preset_bundle->prints;
+    Preset my_preset(Preset::TYPE_PRINT, name, false);
+    my_preset.config = std::move(built_config);
+
+    Preset old_edited_preset = prints.get_edited_preset();
+    std::string old_name = prints.get_selected_preset().name;
+    prints.save_current_preset(name, false, save_to_project, &my_preset);
+
+    if (name != old_name) {
+        prints.select_preset_by_name(old_name, true);
+        prints.get_edited_preset() = std::move(old_edited_preset);
+    }
+
+    wxGetApp().plater()->take_snapshot("Save Object as Process Preset");
+    set_process_preset_name_for_target(this, target->first, target->second, name);
+    notify_changed(target->first);
+
+    if (Tab *print_tab = wxGetApp().get_tab(Preset::TYPE_PRINT)) {
+        print_tab->update_dirty();
+        print_tab->update_tab_ui();
+    }
+    update_process_preset_choice();
+    wxGetApp().params_panel()->notify_object_config_changed();
+    wxGetApp().mainframe->on_config_changed(m_config);
+}
+
+void TabPrintModel::update_process_preset_choice()
+{
+    if (m_presets_choice == nullptr || !has_process_preset_combo())
+        return;
+
+    PresetCollection &prints = wxGetApp().preset_bundle->prints;
+    std::string preset_name = common_process_preset_name(this, m_object_configs);
+    if (preset_name.empty() || prints.find_preset(preset_name, false, true) == nullptr)
+        preset_name = prints.get_selected_preset().name;
+
+    m_presets_choice->set_forced_selected_preset(preset_name);
+    m_presets_choice->update();
+    set_selected_process_combo_label(m_presets_choice, preset_name,
+        process_preset_is_modified_for_targets(this, m_object_configs, preset_name));
+    update_btns_enabling();
+}
+
 void TabPrintModel::update_model_config()
 {
     if (m_config_manipulation.is_applying()) {
@@ -3125,6 +3408,8 @@ void TabPrintModel::reset_model_config()
         for (auto& k : rmkeys) {
             config.second->erase(k);
         }
+        if (has_process_preset_combo())
+            set_process_preset_name_for_target(this, config.first, config.second, {});
         notify_changed(config.first);
     }
     update_model_config();
@@ -3227,6 +3512,7 @@ void TabPrintModel::on_value_change(const std::string& opt_id, const boost::any&
         config.second->touch();
         notify_changed(config.first);
     }
+    update_process_preset_choice();
     wxGetApp().params_panel()->notify_object_config_changed();
 }
 
@@ -5726,6 +6012,11 @@ void Tab::rebuild_page_tree()
 
 void Tab::update_btns_enabling()
 {
+    if (auto model_tab = dynamic_cast<TabPrintModel*>(this); model_tab != nullptr && model_tab->has_process_preset_combo()) {
+        m_btn_delete_preset->Hide();
+        return;
+    }
+
     // we can delete any preset from the physical printer
     // and any user preset
     const Preset& preset = m_presets->get_edited_preset();
@@ -5739,8 +6030,12 @@ void Tab::update_btns_enabling()
 
 void Tab::update_preset_choice()
 {
-    if (m_presets_choice)
-        m_presets_choice->update();
+    if (m_presets_choice) {
+        if (auto model_tab = dynamic_cast<TabPrintModel*>(this); model_tab != nullptr && model_tab->has_process_preset_combo())
+            model_tab->update_process_preset_choice();
+        else
+            m_presets_choice->update();
+    }
     update_btns_enabling();
 }
 

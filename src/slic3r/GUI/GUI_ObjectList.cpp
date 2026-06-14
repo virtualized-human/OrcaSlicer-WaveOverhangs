@@ -14,6 +14,7 @@
 #include "Tab.hpp"
 #include "wxExtensions.hpp"
 #include "libslic3r/Model.hpp"
+#include "libslic3r/ObjectProcessPreset.hpp"
 #include "GLCanvas3D.hpp"
 #include "Selection.hpp"
 #include "PartPlate.hpp"
@@ -22,6 +23,7 @@
 #include "MsgDialog.hpp"
 #include "Widgets/ProgressDialog.hpp"
 #include "SingleChoiceDialog.hpp"
+#include "SavePresetDialog.hpp"
 #include "StepMeshDialog.hpp"
 
 
@@ -1341,6 +1343,203 @@ void ObjectList::paste_settings_into_list()
 
         // Add settings item for object/sub-object and show them
         add_settings_item(item, &config->get());
+    }
+
+    part_selection_changed();
+}
+
+static wxDataViewItem process_preset_target_item(ObjectDataViewModel *model, wxDataViewItem item)
+{
+    if (!item)
+        return item;
+
+    ItemType type = model->GetItemType(item);
+    if (type & itSettings) {
+        item = model->GetParent(item);
+        type = model->GetItemType(item);
+    }
+    if (type & itInstance)
+        item = model->GetObject(item);
+
+    return item;
+}
+
+static void set_process_preset_name_for_item(
+    ObjectDataViewModel      *model,
+    const ModelObjectPtrs    *objects,
+    wxDataViewItem            item,
+    const std::string        &preset_name)
+{
+    const int obj_idx = model->GetObjectIdByItem(item);
+    if (obj_idx < 0 || obj_idx >= int(objects->size()))
+        return;
+
+    ModelObject *object = (*objects)[obj_idx];
+    ItemType item_type = model->GetItemType(item);
+
+    if (item_type & itObject) {
+        object->process_preset_name = preset_name;
+    } else if (item_type & itVolume) {
+        const int vol_idx = model->GetVolumeIdByItem(item);
+        if (vol_idx >= 0 && vol_idx < int(object->volumes.size()))
+            object->volumes[vol_idx]->process_preset_name = preset_name;
+    } else if (item_type & itLayer) {
+        t_layer_height_range range = model->GetLayerRangeByItem(item);
+        if (preset_name.empty())
+            object->layer_config_ranges_process_preset.erase(range);
+        else
+            object->layer_config_ranges_process_preset[range] = preset_name;
+    }
+}
+
+void ObjectList::apply_process_preset_to_selection()
+{
+    PresetBundle *preset_bundle = wxGetApp().preset_bundle;
+    PresetCollection &prints = preset_bundle->prints;
+
+    wxArrayString choices;
+    std::vector<std::string> preset_names;
+    for (const Preset &preset : prints()) {
+        if (preset.is_visible && !preset.is_default) {
+            choices.Add(from_u8(preset.name));
+            preset_names.push_back(preset.name);
+        }
+    }
+    if (choices.IsEmpty()) {
+        wxMessageBox(_L("No process presets available."), _L("Apply Process Preset"), wxOK | wxICON_INFORMATION);
+        return;
+    }
+
+    SingleChoiceDialog dlg(_L("Select a process preset to apply to the selected objects:"),
+                           _L("Apply Process Preset"), choices, 0, wxGetApp().mainframe);
+    int sel = dlg.GetSingleChoiceIndex();
+    if (sel < 0 || sel >= (int)preset_names.size())
+        return;
+
+    Preset *chosen = prints.find_preset(preset_names[sel], false, true);
+    if (!chosen)
+        return;
+
+    const DynamicPrintConfig &global_baseline = prints.get_edited_preset().config;
+    const DynamicPrintConfig &proc_cfg =
+        (chosen->name == prints.get_selected_preset().name) ? prints.get_edited_preset().config : chosen->config;
+
+    wxDataViewItemArray sels;
+    GetSelections(sels);
+    if (sels.IsEmpty())
+        return;
+
+    take_snapshot("Apply Process Preset");
+
+    for (const wxDataViewItem &item : sels) {
+        wxDataViewItem target_item = process_preset_target_item(m_objects_model, item);
+        if (!target_item)
+            continue;
+        ItemType item_type = m_objects_model->GetItemType(target_item);
+        if (!(item_type & (itObject | itVolume | itLayer)))
+            continue;
+
+        ModelConfig &config = get_item_config(target_item);
+        const bool object_target = bool(item_type & itObject);
+
+        erase_process_overrides(config, object_target);
+
+        auto result = object_target ?
+            apply_process_preset_to_object(proc_cfg, global_baseline) :
+            apply_process_preset_to_region(proc_cfg, global_baseline);
+        config.apply(result.object_overrides, true);
+        set_process_preset_name_for_item(m_objects_model, m_objects, target_item, chosen->name);
+        config.touch();
+
+        add_settings_item(target_item, &config.get());
+    }
+
+    part_selection_changed();
+}
+
+void ObjectList::save_selection_as_process_preset()
+{
+    wxDataViewItem item = process_preset_target_item(m_objects_model, GetSelection());
+    if (!item)
+        return;
+
+    ItemType item_type = m_objects_model->GetItemType(item);
+    if (!(item_type & (itObject | itVolume | itLayer)))
+        return;
+
+    const DynamicPrintConfig &global_baseline = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+    DynamicPrintConfig local_config;
+
+    if (item_type & (itVolume | itLayer)) {
+        const int obj_idx = m_objects_model->GetObjectIdByItem(item);
+        if (obj_idx < 0 || obj_idx >= int(m_objects->size()))
+            return;
+        local_config.apply((*m_objects)[obj_idx]->config.get(), true);
+    }
+    local_config.apply(get_item_config(item).get(), true);
+
+    const bool object_target = bool(item_type & itObject);
+    DynamicPrintConfig built_config = object_target ?
+        build_process_preset_from_object(global_baseline, local_config) :
+        build_process_preset_from_region(global_baseline, local_config);
+
+    SavePresetDialog dlg(wxGetApp().mainframe, Preset::TYPE_PRINT);
+    if (dlg.ShowModal() != wxID_OK)
+        return;
+
+    std::string name = dlg.get_name();
+    if (name.empty())
+        return;
+
+    bool save_to_project = dlg.get_save_to_project_selection(Preset::TYPE_PRINT);
+
+    PresetCollection &prints = wxGetApp().preset_bundle->prints;
+    Preset my_preset(Preset::TYPE_PRINT, name, false);
+    my_preset.config = std::move(built_config);
+
+    Preset old_edited_preset = prints.get_edited_preset();
+    std::string old_name = prints.get_selected_preset().name;
+    prints.save_current_preset(name, false, save_to_project, &my_preset);
+
+    if (name != old_name) {
+        prints.select_preset_by_name(old_name, true);
+        prints.get_edited_preset() = std::move(old_edited_preset);
+    }
+
+    Tab *print_tab = wxGetApp().get_tab(Preset::TYPE_PRINT);
+    print_tab->update_dirty();
+    print_tab->update_tab_ui();
+
+    take_snapshot("Save Object as Process Preset");
+    set_process_preset_name_for_item(m_objects_model, m_objects, item, name);
+    get_item_config(item).touch();
+    add_settings_item(item, &get_item_config(item).get());
+    part_selection_changed();
+}
+
+void ObjectList::reset_object_process_overrides()
+{
+    wxDataViewItemArray sels;
+    GetSelections(sels);
+    if (sels.IsEmpty())
+        return;
+
+    take_snapshot("Reset Object Process Overrides");
+
+    for (const wxDataViewItem &item : sels) {
+        wxDataViewItem target_item = process_preset_target_item(m_objects_model, item);
+        if (!target_item)
+            continue;
+        ItemType item_type = m_objects_model->GetItemType(target_item);
+        if (!(item_type & (itObject | itVolume | itLayer)))
+            continue;
+
+        ModelConfig &config = get_item_config(target_item);
+        erase_process_overrides(config, bool(item_type & itObject));
+        set_process_preset_name_for_item(m_objects_model, m_objects, target_item, {});
+        config.touch();
+
+        add_settings_item(target_item, &config.get());
     }
 
     part_selection_changed();

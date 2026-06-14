@@ -5,6 +5,7 @@
 #include "Preset.hpp"
 #include "PresetBundle.hpp"
 #include "AppConfig.hpp"
+#include "ObjectProcessPreset.hpp"
 
 #ifdef _MSC_VER
     #define WIN32_LEAN_AND_MEAN
@@ -412,6 +413,8 @@ void Preset::normalize(DynamicPrintConfig &config)
     }
 
     handle_legacy_sla(config);
+
+    migrate_legacy_object_keys(config);
 }
 
 std::string Preset::remove_invalid_keys(DynamicPrintConfig &config, const DynamicPrintConfig &default_config)

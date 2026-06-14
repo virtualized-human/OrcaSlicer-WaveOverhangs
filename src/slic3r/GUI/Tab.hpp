@@ -484,6 +484,11 @@ public:
 
 	void update_model_config();
 
+    bool has_process_preset_combo() const { return m_type == Preset::TYPE_MODEL; }
+    void select_process_preset(const std::string &preset_name);
+    void save_process_preset();
+    void update_process_preset_choice();
+
 	virtual void reset_model_config();
 
 	bool has_key(std::string const &key);

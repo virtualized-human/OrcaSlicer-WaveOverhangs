@@ -321,6 +321,8 @@ set(lisbslic3r_sources
     ObjColorUtils.hpp
     ObjectID.cpp
     ObjectID.hpp
+    ObjectProcessPreset.cpp
+    ObjectProcessPreset.hpp
     Optimize/BruteforceOptimizer.hpp
     Optimize/NLoptOptimizer.hpp
     Optimize/Optimizer.hpp
