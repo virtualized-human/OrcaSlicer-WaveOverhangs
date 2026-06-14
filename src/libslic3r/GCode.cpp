@@ -6728,7 +6728,14 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     // Orca: wave-overhang print speed override. Overrides any prior speed selection
     // (including dynamic overhang-speed results) so wave-overhang paths print at the
     // user-configured wave speed. Also disables variable_speed so we emit a single F.
-    if (path.wave_overhang && m_config.wave_overhang_print_speed.value > 0) {
+    if (path.wave_overhang && path.wave_overhang_supported
+        && m_config.wave_overhang_supported_speed.value > 0) {
+        // Orca: this wave line has support directly underneath, so it is no longer
+        // fully cantilevered — print it faster than the slow wave print speed.
+        speed = m_config.wave_overhang_supported_speed.value;
+        variable_speed = false;
+        new_points.clear();
+    } else if (path.wave_overhang && m_config.wave_overhang_print_speed.value > 0) {
         speed = m_config.wave_overhang_print_speed.value;
         variable_speed = false;
         new_points.clear();

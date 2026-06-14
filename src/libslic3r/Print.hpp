@@ -540,6 +540,10 @@ private:
     // so the G-code stage applies wave_overhang_perimeter_speed (wave layers) or
     // wave_overhang_floor_perimeter_speed (floor layers) to those walls.
     void tag_wave_overhang_perimeters();
+    // Orca: tag wave-overhang ExtrusionPaths that have support material directly
+    // beneath them, so the G-code stage can print them at wave_overhang_supported_speed
+    // (faster) instead of the slow cantilever speed. Runs AFTER support generation.
+    void tag_wave_overhang_supported();
     void combine_infill();
     void _generate_support_material();
     std::pair<FillAdaptive::OctreePtr, FillAdaptive::OctreePtr> prepare_adaptive_infill_data(

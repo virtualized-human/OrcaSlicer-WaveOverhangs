@@ -4736,6 +4736,19 @@ void PrintConfigDef::init_fff_params()
     def->min = 0.1;
     def->set_default_value(new ConfigOptionFloat(2.0));
 
+    def = this->add("wave_overhang_supported_speed", coFloat);
+    def->label = L("Supported speed");
+    def->category = L("Speed");
+    def->tooltip = L("Print speed for wave-overhang lines that have generated support material "
+                     "directly beneath them. Those lines are no longer fully cantilevered, so they "
+                     "can be printed faster than the (slow) wave print speed. Only effective when "
+                     "support is enabled and actually sits under the wave. 0 = disabled (use the "
+                     "normal wave print speed everywhere).");
+    def->sidetext = L("mm/s");
+    def->mode = comAdvanced;
+    def->min = 0;
+    def->set_default_value(new ConfigOptionFloat(0.0));
+
     def = this->add("wave_overhang_perimeter_speed", coFloat);
     def->label = L("Perimeter speed");
     def->category = L("Speed");

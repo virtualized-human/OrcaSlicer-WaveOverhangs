@@ -818,6 +818,11 @@ void PrintObject::generate_support_material()
 
             this->_generate_support_material();
             m_print->throw_if_canceled();
+
+            // Orca: now that support exists, flag wave-overhang paths that sit on it
+            // so the G-code stage can speed them up.
+            this->tag_wave_overhang_supported();
+            m_print->throw_if_canceled();
         }
         this->set_done(posSupportMaterial);
     }
@@ -2107,6 +2112,194 @@ void PrintObject::tag_wave_overhang_perimeters()
 }
 // ==============================================================================================================
 // === ORCA: End of tag_wave_overhang_perimeters ================================================================
+// ==============================================================================================================
+
+// ==============================================================================================================
+// === ORCA: Tag wave-overhang paths that sit on support ========================================================
+// Runs AFTER generate_support_material(). For every wave-overhang ExtrusionPath, splits it at the support
+// boundary (per segment, by segment midpoint) so the portion with support material directly beneath it is
+// flagged wave_overhang_supported (G-code prints it at wave_overhang_supported_speed) while the cantilevered
+// portion stays slow. Splitting per segment — not per whole path — is required: printing a half-cantilevered
+// line at the fast supported speed wrecks the unsupported half.
+// ==============================================================================================================
+namespace {
+// Split a polyline into ordered, connected runs that are either fully over support
+// or fully cantilevered. The split lands EXACTLY where the line crosses the support
+// boundary: the precise intersection points are inserted first, so no segment
+// straddles the boundary. Consecutive runs share their boundary point.
+static std::vector<std::pair<Polyline, bool>>
+split_polyline_by_support(const Polyline &poly, const ExPolygons &support,
+                          const Lines &support_edges, const BoundingBox &support_bb)
+{
+    std::vector<std::pair<Polyline, bool>> runs;
+    const Points &pts = poly.points;
+    if (pts.size() < 2) {
+        runs.emplace_back(poly, false);
+        return runs;
+    }
+
+    // 1) Densify the polyline with the exact support-boundary crossing points.
+    Points dense;
+    dense.reserve(pts.size() * 2);
+    dense.push_back(pts.front());
+    for (size_t i = 0; i + 1 < pts.size(); ++i) {
+        const Point &a = pts[i];
+        const Point &b = pts[i + 1];
+        BoundingBox seg_bb(Points{ a, b });
+        if (seg_bb.overlap(support_bb)) {
+            const Line seg(a, b);
+            std::vector<std::pair<double, Point>> cross; // (dist^2 from a, crossing point)
+            for (const Line &e : support_edges) {
+                Point ip;
+                if (seg.intersection(e, &ip))
+                    cross.emplace_back((ip - a).cast<double>().squaredNorm(), ip);
+            }
+            std::sort(cross.begin(), cross.end(),
+                      [](const std::pair<double, Point> &x, const std::pair<double, Point> &y) { return x.first < y.first; });
+            for (const auto &c : cross)
+                if (c.second != dense.back())
+                    dense.push_back(c.second);
+        }
+        if (b != dense.back())
+            dense.push_back(b);
+    }
+
+    // 2) Each dense segment is now fully inside or outside; classify by midpoint
+    //    and group consecutive same-state segments into connected runs.
+    auto seg_supported = [&](const Point &a, const Point &b) -> bool {
+        const Point mid((a.x() + b.x()) / 2, (a.y() + b.y()) / 2);
+        if (! support_bb.contains(mid))
+            return false;
+        for (const ExPolygon &e : support)
+            if (e.contains(mid))
+                return true;
+        return false;
+    };
+    if (dense.size() < 2) {
+        runs.emplace_back(poly, false);
+        return runs;
+    }
+    bool     cur = seg_supported(dense[0], dense[1]);
+    Polyline run;
+    run.points.push_back(dense[0]);
+    for (size_t i = 0; i + 1 < dense.size(); ++i) {
+        const bool s = seg_supported(dense[i], dense[i + 1]);
+        if (s != cur) {
+            runs.emplace_back(std::move(run), cur);
+            run = Polyline();
+            run.points.push_back(dense[i]);
+            cur = s;
+        }
+        run.points.push_back(dense[i + 1]);
+    }
+    runs.emplace_back(std::move(run), cur);
+    return runs;
+}
+
+// Apply the per-segment split to one ExtrusionPath; returns the resulting sub-paths
+// (each a copy of `src` with its own polyline and wave_overhang_supported flag).
+// Returns empty when no split is needed (single run) and sets src's flag in place.
+static ExtrusionPaths split_supported_wave_path(ExtrusionPath &src, const ExPolygons &support,
+                                                const Lines &support_edges, const BoundingBox &support_bb)
+{
+    ExtrusionPaths out;
+    if (! src.wave_overhang || src.polyline.points.size() < 2)
+        return out;
+    auto runs = split_polyline_by_support(src.polyline, support, support_edges, support_bb);
+    if (runs.size() <= 1) {
+        src.wave_overhang_supported = runs.empty() ? false : runs.front().second;
+        return out; // no split
+    }
+    out.reserve(runs.size());
+    for (auto &r : runs) {
+        ExtrusionPath np(r.first, src);
+        np.wave_overhang_supported = r.second;
+        out.push_back(std::move(np));
+    }
+    return out;
+}
+
+static void split_supported_wave_in_collection(ExtrusionEntityCollection &coll, const ExPolygons &support,
+                                               const Lines &support_edges, const BoundingBox &support_bb)
+{
+    ExtrusionEntitiesPtr rebuilt;
+    rebuilt.reserve(coll.entities.size());
+    for (ExtrusionEntity *e : coll.entities) {
+        if (auto *path = dynamic_cast<ExtrusionPath*>(e); path != nullptr && path->wave_overhang) {
+            ExtrusionPaths split = split_supported_wave_path(*path, support, support_edges, support_bb);
+            if (split.empty()) {
+                rebuilt.push_back(e); // flag set in place, keep entity
+            } else {
+                for (ExtrusionPath &np : split)
+                    rebuilt.push_back(new ExtrusionPath(std::move(np)));
+                delete e;
+            }
+        } else if (auto *mp = dynamic_cast<ExtrusionMultiPath*>(e)) {
+            ExtrusionPaths newpaths;
+            newpaths.reserve(mp->paths.size());
+            bool changed = false;
+            for (ExtrusionPath &ip : mp->paths) {
+                ExtrusionPaths split = ip.wave_overhang
+                    ? split_supported_wave_path(ip, support, support_edges, support_bb) : ExtrusionPaths{};
+                if (split.empty()) {
+                    newpaths.push_back(ip);
+                } else {
+                    for (ExtrusionPath &np : split)
+                        newpaths.push_back(std::move(np));
+                    changed = true;
+                }
+            }
+            if (changed)
+                mp->paths = std::move(newpaths);
+            rebuilt.push_back(e);
+        } else if (auto *child = dynamic_cast<ExtrusionEntityCollection*>(e)) {
+            split_supported_wave_in_collection(*child, support, support_edges, support_bb);
+            rebuilt.push_back(e);
+        } else {
+            rebuilt.push_back(e);
+        }
+    }
+    coll.entities = std::move(rebuilt);
+}
+} // anonymous namespace
+
+void PrintObject::tag_wave_overhang_supported()
+{
+    bool any_wave = false;
+    for (size_t region_id = 0; region_id < this->num_printing_regions(); ++ region_id)
+        if (this->printing_region(region_id).config().wave_overhangs.value) { any_wave = true; break; }
+    if (!any_wave || m_support_layers.empty())
+        return;
+
+    BOOST_LOG_TRIVIAL(info) << "Tagging wave-overhang paths over support...";
+
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, m_layers.size()),
+        [this](const tbb::blocked_range<size_t> &range) {
+            for (size_t idx_layer = range.begin(); idx_layer < range.end(); ++ idx_layer) {
+                m_print->throw_if_canceled();
+                Layer       *layer = m_layers[idx_layer];
+                const double z = layer->print_z;
+                const double h = layer->height;
+                // Support whose top sits within one layer-height below this layer is
+                // "directly underneath" the wave printed on this layer.
+                ExPolygons support_below;
+                for (const SupportLayer *sl : m_support_layers) {
+                    if (sl->print_z < z + EPSILON && sl->print_z > z - h - EPSILON)
+                        append(support_below, sl->support_islands);
+                }
+                if (support_below.empty())
+                    continue;
+                support_below = union_ex(support_below);
+                const Lines       support_edges = to_lines(support_below);
+                const BoundingBox support_bb    = get_extents(support_below);
+                for (LayerRegion *layerm : layer->m_regions)
+                    split_supported_wave_in_collection(layerm->perimeters, support_below, support_edges, support_bb);
+            }
+        });
+    m_print->throw_if_canceled();
+}
+// ==============================================================================================================
+// === ORCA: End of tag_wave_overhang_supported =================================================================
 // ==============================================================================================================
 
 void PrintObject::process_external_surfaces()

@@ -895,7 +895,7 @@ static std::vector<std::string> s_Preset_print_options {
     "wave_overhang_perimeter_overlap", "wave_overhang_minimum_width", "wave_overhang_pattern",
     "support_remaining_areas_after_wave_overhangs",
     "wave_overhang_line_spacing", "wave_overhang_flow_mm3_per_mm",
-    "wave_overhang_print_speed", "wave_overhang_perimeter_speed", "wave_overhang_travel_speed", "wave_overhang_fan_speed",
+    "wave_overhang_print_speed", "wave_overhang_supported_speed", "wave_overhang_perimeter_speed", "wave_overhang_travel_speed", "wave_overhang_fan_speed",
     "wave_overhang_aux_fan_speed",
     "wave_overhang_nozzle_temp", "wave_overhang_min_wave_time", "wave_overhang_min_layer_time",
     "wave_overhang_floor_layers",

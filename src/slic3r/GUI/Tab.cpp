@@ -2447,6 +2447,7 @@ void TabPrint::build()
 
         optgroup = page->new_optgroup(L("Motion"), L"param_speed");
         optgroup->append_single_option_line("wave_overhang_print_speed");
+        optgroup->append_single_option_line("wave_overhang_supported_speed");
         optgroup->append_single_option_line("wave_overhang_perimeter_speed");
         optgroup->append_single_option_line("wave_overhang_travel_speed");
         optgroup->append_single_option_line("wave_overhang_end_retract_length");
