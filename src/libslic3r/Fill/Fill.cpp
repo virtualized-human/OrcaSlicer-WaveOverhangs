@@ -235,6 +235,25 @@ double calculate_infill_rotation_angle(const PrintObject* object,
     return angle;
 }
 
+static double calculate_infill_rotation_angle_with_first_layer_override(
+    const PrintObject *object,
+    size_t             layer_id,
+    double             fixed_infill_angle,
+    const std::string &template_string,
+    double             first_layer_infill_angle,
+    bool              &fixed_angle)
+{
+    if (layer_id == 0 && first_layer_infill_angle >= 0.) {
+        fixed_angle = true;
+        return Geometry::deg2rad(first_layer_infill_angle);
+    }
+
+    // When the first layer direction is explicit, keep following layers from
+    // applying Orca's automatic 90-degree alternation on top of their base angle.
+    fixed_angle = first_layer_infill_angle >= 0. || !template_string.empty();
+    return calculate_infill_rotation_angle(object, layer_id, fixed_infill_angle, template_string);
+}
+
 struct SurfaceFillParams
 {
 	// Zero based extruder ID.
@@ -992,13 +1011,15 @@ std::vector<SurfaceFill> group_fills(const Layer &layer, LockRegionParam &lock_p
                 params.multiline = params.extrusion_role == erInternalInfill ? int(region_config.fill_multiline) : 1;
 
                 if (params.extrusion_role == erInternalInfill) {
-                    params.angle = calculate_infill_rotation_angle(layer.object(), layer.id(), region_config.infill_direction.value,
-                                                                   region_config.sparse_infill_rotate_template.value);
-                    params.fixed_angle = !region_config.sparse_infill_rotate_template.value.empty();
+                    params.angle = calculate_infill_rotation_angle_with_first_layer_override(
+                        layer.object(), layer.id(), region_config.infill_direction.value,
+                        region_config.sparse_infill_rotate_template.value, region_config.initial_layer_infill_direction.value,
+                        params.fixed_angle);
                 } else {
-                    params.angle = calculate_infill_rotation_angle(layer.object(), layer.id(), region_config.solid_infill_direction.value,
-                                                                   region_config.solid_infill_rotate_template.value);
-                    params.fixed_angle = !region_config.solid_infill_rotate_template.value.empty();
+                    params.angle = calculate_infill_rotation_angle_with_first_layer_override(
+                        layer.object(), layer.id(), region_config.solid_infill_direction.value,
+                        region_config.solid_infill_rotate_template.value, region_config.initial_layer_infill_direction.value,
+                        params.fixed_angle);
                 }
                 params.bridge_angle = float(surface.bridge_angle);
                 
@@ -1184,9 +1205,10 @@ std::vector<SurfaceFill> group_fills(const Layer &layer, LockRegionParam &lock_p
 	            params.density 		 = 100.f;
 		        params.extrusion_role = erSolidInfill;
 		        const PrintRegionConfig &region_config = layerm.region().config();
-                params.angle = calculate_infill_rotation_angle(layer.object(), layer.id(), region_config.solid_infill_direction.value,
-                                                               region_config.solid_infill_rotate_template.value);
-                params.fixed_angle = !region_config.solid_infill_rotate_template.value.empty();
+                params.angle = calculate_infill_rotation_angle_with_first_layer_override(
+                    layer.object(), layer.id(), region_config.solid_infill_direction.value,
+                    region_config.solid_infill_rotate_template.value, region_config.initial_layer_infill_direction.value,
+                    params.fixed_angle);
 
                 // calculate the actual flow we'll be using for this infill
 				params.flow = layerm.flow(frSolidInfill);

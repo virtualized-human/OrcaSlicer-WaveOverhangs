@@ -2311,10 +2311,14 @@ void TabPrint::build()
         auto optgroup = page->new_optgroup(L("Layer height"), L"param_layer_height");
         optgroup->append_single_option_line("layer_height","quality_settings_layer_height");
         optgroup->append_single_option_line("initial_layer_print_height","quality_settings_layer_height");
+        if (m_type == Preset::TYPE_MODEL)
+            optgroup->append_single_option_line("object_initial_layer_height", "quality_settings_layer_height");
 
         optgroup = page->new_optgroup(L("Line width"), L"param_line_width");
         optgroup->append_single_option_line("line_width","quality_settings_line_width");
         optgroup->append_single_option_line("initial_layer_line_width","quality_settings_line_width");
+        if (m_type == Preset::TYPE_MODEL)
+            optgroup->append_single_option_line("object_initial_layer_line_width", "quality_settings_line_width");
         optgroup->append_single_option_line("outer_wall_line_width","quality_settings_line_width");
         optgroup->append_single_option_line("inner_wall_line_width","quality_settings_line_width");
         optgroup->append_single_option_line("top_surface_line_width","quality_settings_line_width");
@@ -2536,6 +2540,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("infill_anchor", "strength_settings_infill#anchor");
         optgroup->append_single_option_line("internal_solid_infill_pattern", "strength_settings_infill#internal-solid-infill");
         optgroup->append_single_option_line("solid_infill_direction", "strength_settings_infill#direction");
+        optgroup->append_single_option_line("initial_layer_infill_direction", "strength_settings_infill#direction");
         optgroup->append_single_option_line("solid_infill_rotate_template", "strength_settings_infill_rotation_template_metalanguage");
         optgroup->append_single_option_line("gap_fill_target", "strength_settings_infill#apply-gap-fill");
         optgroup->append_single_option_line("filter_out_gap_fill", "strength_settings_infill#filter-out-tiny-gaps");
@@ -2555,6 +2560,8 @@ void TabPrint::build()
     page = add_options_page(L("Speed"), "custom-gcode_speed"); // ORCA: icon only visible on placeholders
         optgroup = page->new_optgroup(L("First layer speed"), L"param_speed_first", 15);
         optgroup->append_single_option_line("initial_layer_speed", "speed_settings_initial_layer_speed#initial-layer");
+        if (m_type == Preset::TYPE_MODEL)
+            optgroup->append_single_option_line("object_initial_layer_speed", "speed_settings_initial_layer_speed#initial-layer");
         optgroup->append_single_option_line("initial_layer_infill_speed", "speed_settings_initial_layer_speed#initial-layer-infill");
         optgroup->append_single_option_line("initial_layer_travel_speed", "speed_settings_initial_layer_speed#initial-layer-travel-speed");
         optgroup->append_single_option_line("slow_down_layers", "speed_settings_initial_layer_speed#number-of-slow-layers");

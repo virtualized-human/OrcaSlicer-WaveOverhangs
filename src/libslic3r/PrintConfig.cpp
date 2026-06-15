@@ -2805,6 +2805,16 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(45));
 
+    def = this->add("initial_layer_infill_direction", coFloat);
+    def->label = L("First layer infill direction");
+    def->category = L("Strength");
+    def->tooltip = L("Angle for first layer infill patterns. Set to -1 to use the normal sparse or solid infill direction.");
+    def->sidetext = u8"°";
+    def->min = -1;
+    def->max = 360;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(-1));
+
     def = this->add("sparse_infill_density", coPercent);
     def->label = L("Sparse infill density");
     def->category = L("Strength");
